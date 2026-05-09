@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>유치원 등하원 관리</title>
+<style>
+  :root {
+    --bg: #f5f4f0;
+    --card: #ffffff;
+    --border: #e2e0d8;
+    --text: #2c2c2a;
+    --muted: #888780;
+    --accent: #4f46e5;
+    --green: #15803d;
+    --green-light: #dcfce7;
+    --red: #dc2626;
+    --red-light: #fee2e2;
+    --amber: #d97706;
+    --amber-light: #fef3c7;
+    --blue: #2563eb;
+    --blue-light: #dbeafe;
+    --gray-light: #f1f0ec;
+    --changed: #7c3aed;
+    --changed-light: #ede9fe;
+    --radius: 10px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; min-height: 100vh; }
+
+  /* 로딩 */
+  #loadingOverlay { position: fixed; inset: 0; background: rgba(255,255,255,0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; gap: 14px; }
+  .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loadingOverlay p { font-size: 14px; color: var(--muted); }
+
+  /* 동기화 상태 바 */
+  .sync-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 6px 16px; background: var(--card); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); z-index: 50; }
+  .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+  .sync-dot.pending { background: var(--amber); animation: pulse 1s infinite; }
+  .sync-dot.error { background: var(--red); }
+
+  /* 헤더 */
+  .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+  .header-title { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .header-date { font-size: 12px; color: var(--muted); }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* 탭 */
+  .tab-nav { display: flex; background: var(--card); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+  .tab-nav::-webkit-scrollbar { display: none; }
+  .tab-btn { flex: none; padding: 12px 16px; font-size: 13px; font-weight: 500; color: var(--muted); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: all 0.15s; font-family: inherit; }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn:hover:not(.active) { background: var(--gray-light); color: var(--text); }
+
+  .content { padding: 16px 16px 64px; max-width: 900px; margin: 0 auto; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* 카드 */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .card-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+
+  /* 배지 */
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge-green  { background: var(--green-light);   color: var(--green); }
+  .badge-red    { background: var(--red-light);     color: var(--red); }
+  .badge-amber  { background: var(--amber-light);   color: var(--amber); }
+  .badge-blue   { background: var(--blue-light);    color: var(--blue); }
+  .badge-gray   { background: var(--gray-light);    color: var(--muted); }
+  .badge-purple { background: var(--changed-light); color: var(--changed); }
+
+  /* 버튼 */
+  .btn { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 13px; cursor: pointer; transition: all 0.12s; font-weight: 500; font-family: inherit; }
+  .btn:hover { background: var(--gray-light); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-danger { background: var(--red-light); color: var(--red); border-color: #fca5a5; }
+
+  /* 통계 */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: center; }
+  .stat-num { font-size: 26px; font-weight: 700; line-height: 1; }
+  .stat-label { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* 아이 행 */
+  .child-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .child-row:last-child { border-bottom: none; }
+  .check-btn { width: 30px; height: 30px; border-radius: 7px; border: 1.5px solid var(--border); background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 15px; transition: all 0.1s; flex-shrink: 0; font-family: inherit; }
+  .check-btn.on  { background: var(--green-light); border-color: var(--green); }
+  .check-btn.off { background: var(--red-light);   border-color: var(--red); }
+
+  /* 폼 */
+  .form-group { margin-bottom: 14px; }
+  .form-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 5px; display: block; }
+  .form-input, .form-select { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--card); color: var(--text); outline: none; transition: border-color 0.15s; font-family: inherit; }
+  .form-input:focus, .form-select:focus { border-color: var(--accent); }
+
+  /* 모달 */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--card); border-radius: 14px; padding: 20px; width: 100%; max-width: 420px; max-height: 88vh; overflow-y: auto; }
+  .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+  /* 로그 */
+  .log-item { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
+  .log-item:last-child { border-bottom: none; }
+  .log-time { font-size: 11px; color: var(--muted); min-width: 42px; padding-top: 2px; flex-shrink: 0; }
+  .log-text { font-size: 13px; line-height: 1.5; }
+
+  /* 일정표 */
+  .sch-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .sch-table th { background: var(--gray-light); padding: 8px 6px; text-align: center; font-weight: 600; border: 1px solid var(--border); font-size: 11px; }
+  .sch-table td { padding: 7px 6px; border: 1px solid var(--border); text-align: center; vertical-align: top; }
+
+  .section-title { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.05em; margin: 18px 0 8px; }
+  .section-title:first-child { margin-top: 0; }
+  .divider { height: 1px; background: var(--border); margin: 12px 0; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+  @media (max-width: 480px) {
+    .content { padding: 12px 12px 64px; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div id="loadingOverlay">
+  <div class="spinner"></div>
+  <p id="loadingMsg">Firebase 연결 중...</p>
+</div>
+
+<div class="header">
+  <div class="header-title">🚌 등하원 관리 <span class="live-dot"></span></div>
+  <div class="header-date" id="todayDate"></div>
+</div>
+
+<div class="tab-nav">
+  <button class="tab-btn active" onclick="showTab('dashboard',this)">📊 오늘 현황</button>
+  <button class="tab-btn" onclick="showTab('morning',this)">🌅 등원 체크</button>
+  <button class="tab-btn" onclick="showTab('afternoon',this)">🌇 하원 체크</button>
+  <button class="tab-btn" onclick="showTab('vehicles',this)">🚌 차량 편성</button>
+  <button class="tab-btn" onclick="showTab('schedule',this)">📅 일정 관리</button>
+  <button class="tab-btn" onclick="showTab('log',this)">📋 변경 기록</button>
+</div>
+
+<div class="content">
+
+  <!-- 오늘 현황 -->
+  <div class="view active" id="view-dashboard">
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>등원 확인</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>결석/미탑승</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div>대기 중</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--changed)"></div>오늘 변경</div>
+    </div>
+    <div class="section-title">차량별 현황</div>
+    <div id="dashboardCards"></div>
+  </div>
+
+  <!-- 등원 체크 -->
+  <div class="view" id="view-morning">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div style="font-size:16px;font-weight:700">🌅 등원 체크</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">결석 처리 시 하원에 자동 반영됩니다</div>
+      </div>
+      <button class="btn btn-sm" onclick="openModal('absenceModal')">+ 결석 추가</button>
+    </div>
+    <div id="morningCards"></div>
+  </div>
+
+  <!-- 하원 체크 -->
+  <div class="view" id="view-afternoon">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div style="font-size:16px;font-weight:700">🌇 하원 체크</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">결석 아이는 자동 제외됩니다</div>
+      </div>
+    </div>
+    <div id="afternoonCards"></div>
+  </div>
+
+  <!-- 차량 편성 -->
+  <div class="view" id="view-vehicles">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:16px;font-weight:700">🚌 차량 편성 관리</div>
+      <button class="btn btn-primary btn-sm" onclick="openChildModal(null)">+ 아이 추가</button>
+    </div>
+    <div id="vehiclesCards"></div>
+  </div>
+
+  <!-- 일정 관리 -->
+  <div class="view" id="view-schedule">
+    <div style="font-size:16px;font-weight:700;margin-bottom:4px">📅 주간 일정</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">차량별 탑승 인원 및 특이사항</div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">차량별 탑승 인원</div></div>
+      <div style="overflow-x:auto"><table class="sch-table" id="schTable"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🔔 특이사항</div>
+        <button class="btn btn-sm" onclick="openModal('noteModal')">+ 추가</button>
+      </div>
+      <div id="notesList"></div>
+    </div>
+  </div>
+
+  <!-- 변경 기록 -->
+  <div class="view" id="view-log">
+    <div style="font-size:16px;font-weight:700;margin-bottom:4px">📋 변경 기록</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">오늘의 모든 변경사항이 실시간으로 기록됩니다</div>
+    <div class="card"><div id="logList"></div></div>
+  </div>
+
+</div><!-- /content -->
+
+<div class="sync-bar">
+  <div class="sync-dot" id="syncDot"></div>
+  <span id="syncText">연결 중...</span>
+</div>
+
+<!-- 결석 모달 -->
+<div class="modal-overlay" id="absenceModal">
+  <div class="modal">
+    <div class="modal-title">결석 / 등원 변경</div>
+    <div class="form-group">
+      <label class="form-label">아이 선택</label>
+      <select class="form-select" id="absChild"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">유형</label>
+      <select class="form-select" id="absType" onchange="document.getElementById('absTimeRow').style.display=this.value==='late'?'block':'none'">
+        <option value="absent">결석</option>
+        <option value="late">지각 (등원 시간 변경)</option>
+        <option value="pickup">직접 데려옴 (차량 미이용)</option>
+      </select>
+    </div>
+    <div class="form-group" id="absTimeRow" style="display:none">
+      <label class="form-label">변경 시간</label>
+      <input class="form-input" type="time" id="absTime">
+    </div>
+    <div class="form-group">
+      <label class="form-label">메모 (선택)</label>
+      <input class="form-input" type="text" id="absMemo" placeholder="예: 병원 방문">
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('absenceModal')">취소</button>
+      <button class="btn btn-primary" onclick="saveAbsence()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 아이 추가/수정 모달 -->
+<div class="modal-overlay" id="childModal">
+  <div class="modal">
+    <div class="modal-title" id="childModalTitle">아이 정보</div>
+    <div class="form-group"><label class="form-label">이름</label><input class="form-input" id="fName" placeholder="홍길동"></div>
+    <div class="form-group"><label class="form-label">반</label><input class="form-input" id="fClass" placeholder="예: 해님반"></div>
+    <div class="form-group"><label class="form-label">보호자 연락처</label><input class="form-input" type="tel" id="fPhone" placeholder="010-0000-0000"></div>
+    <div class="divider"></div>
+    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px">🌅 등원 정보</div>
+    <div class="form-group">
+      <label class="form-label">등원 차량</label>
+      <select class="form-select" id="fMBus">
+        <option value="0">해당없음 (직접 등원)</option>
+        <option value="1">1호차</option><option value="2">2호차</option><option value="3">3호차</option>
+        <option value="4">4호차</option><option value="5">5호차</option><option value="6">6호차</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">탑승 시간</label><input class="form-input" type="time" id="fMTime" value="08:00"></div>
+    <div class="form-group"><label class="form-label">탑승 장소</label><input class="form-input" id="fMStop" placeholder="예: 행복아파트 정문"></div>
+    <div class="divider"></div>
+    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px">🌇 하원 정보</div>
+    <div class="form-group">
+      <label class="form-label">하원 차량</label>
+      <select class="form-select" id="fABus">
+        <option value="1">1호차</option><option value="2">2호차</option><option value="3">3호차</option>
+        <option value="4">4호차</option><option value="5">5호차</option><option value="6">6호차</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">하차 시간</label><input class="form-input" type="time" id="fATime" value="16:10"></div>
+    <div class="form-group"><label class="form-label">하차 장소</label><input class="form-input" id="fAStop" placeholder="예: 행복아파트 정문"></div>
+    <div class="modal-footer">
+      <button class="btn btn-danger btn-sm" id="btnDelete" style="margin-right:auto;display:none" onclick="deleteChild()">삭제</button>
+      <button class="btn" onclick="closeModal('childModal')">취소</button>
+      <button class="btn btn-primary" onclick="saveChild()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 하원 시간 변경 모달 -->
+<div class="modal-overlay" id="timeModal">
+  <div class="modal">
+    <div class="modal-title">하원 시간 변경</div>
+    <div id="timeModalInfo" style="margin-bottom:14px;padding:10px;background:var(--gray-light);border-radius:8px;font-size:13px;line-height:1.6"></div>
+    <div class="form-group"><label class="form-label">변경 시간</label><input class="form-input" type="time" id="tNewTime"></div>
+    <div class="form-group"><label class="form-label">변경 사유 (선택)</label><input class="form-input" type="text" id="tMemo" placeholder="예: 행사로 지연"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('timeModal')">취소</button>
+      <button class="btn btn-primary" onclick="saveTimeChange()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 특이사항 모달 -->
+<div class="modal-overlay" id="noteModal">
+  <div class="modal">
+    <div class="modal-title">특이사항 추가</div>
+    <div class="form-group">
+      <label class="form-label">요일</label>
+      <select class="form-select" id="nDay">
+        <option>월요일</option><option>화요일</option><option>수요일</option><option>목요일</option><option>금요일</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">내용</label><input class="form-input" id="nContent" placeholder="예: 현장학습으로 하원 1시간 지연"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('noteModal')">취소</button>
+      <button class="btn btn-primary" onclick="saveNote()">추가</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, set, onValue, push, remove, update }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// ── Firebase 설정 ──
+const app = initializeApp({
+  apiKey: "AIzaSyDf9UbpBsPTNVOdsMO4GY1Hglr8MXo4R70",
+  authDomain: "littlen-transfort-sandul.firebaseapp.com",
+  databaseURL: "https://littlen-transfort-sandul-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "littlen-transfort-sandul",
+  storageBucket: "littlen-transfort-sandul.firebasestorage.app",
+  messagingSenderId: "8107540949",
+  appId: "1:8107540949:web:6f3280be7951a959cd3d5c"
+});
+const db = getDatabase(app);
+
+// ── 날짜 키 (하루 단위 격리) ──
+const now = new Date();
+const dateKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+
+// ── DB 참조 ──
+const R = {
+  children:  ref(db, 'children'),
+  mStatus:   ref(db, `daily/${dateKey}/morningStatus`),
+  aStatus:   ref(db, `daily/${dateKey}/afternoonStatus`),
+  tChanges:  ref(db, `daily/${dateKey}/timeChanges`),
+  absNotes:  ref(db, `daily/${dateKey}/absenceNotes`),
+  logs:      ref(db, `daily/${dateKey}/logs`),
+  schNotes:  ref(db, 'scheduleNotes'),
+};
+
+// ── 차량 정의 ──
+const BUSES = [
+  {id:1, name:'1호차', color:'#4f46e5', morning:true,  afternoon:true},
+  {id:2, name:'2호차', color:'#0891b2', morning:true,  afternoon:true},
+  {id:3, name:'3호차', color:'#059669', morning:false, afternoon:true},
+  {id:4, name:'4호차', color:'#d97706', morning:true,  afternoon:true},
+  {id:5, name:'5호차', color:'#dc2626', morning:true,  afternoon:true},
+  {id:6, name:'6호차', color:'#7c3aed', morning:true,  afternoon:true},
+];
+
+// ── 로컬 상태 ──
+let S = { children:{}, mStatus:{}, aStatus:{}, tChanges:{}, absNotes:{}, logs:{}, schNotes:{} };
+let editChildId = null;
+let editTimeChildId = null;
+
+// ── 날짜 표시 ──
+const DAYS = ['일','월','화','수','목','금','토'];
+document.getElementById('todayDate').textContent =
+  `${now.getMonth()+1}월 ${now.getDate()}일 (${DAYS[now.getDay()]})`;
+
+// ── 동기화 상태 ──
+function setSyncState(state) {
+  const dot = document.getElementById('syncDot');
+  const txt = document.getElementById('syncText');
+  dot.className = 'sync-dot' + (state==='ok'?'':state==='pending'?' pending':' error');
+  txt.textContent = state==='ok'?'실시간 연결됨 · 자동 저장':state==='pending'?'저장 중...':'연결 오류 - 새로고침 필요';
+}
+function pending() { setSyncState('pending'); setTimeout(()=>setSyncState('ok'), 900); }
+
+// ── 리스너 연결 ──
+let firstLoad = true;
+onValue(R.children, snap => {
+  S.children = snap.val() || {};
+  if (firstLoad && Object.keys(S.children).length === 0) seedData();
+  firstLoad = false;
+  render();
+});
+onValue(R.mStatus,  snap => { S.mStatus  = snap.val()||{}; render(); });
+onValue(R.aStatus,  snap => { S.aStatus  = snap.val()||{}; render(); });
+onValue(R.tChanges, snap => { S.tChanges = snap.val()||{}; render(); });
+onValue(R.absNotes, snap => { S.absNotes = snap.val()||{}; render(); });
+onValue(R.logs,     snap => { S.logs     = snap.val()||{}; renderLog(); });
+onValue(R.schNotes, snap => { S.schNotes = snap.val()||{}; renderSchedule(); });
+
+setTimeout(() => {
+  setSyncState('ok');
+  document.getElementById('loadingOverlay').style.display = 'none';
+}, 2000);
+
+// ── 샘플 데이터 ──
+async function seedData() {
+  const samples = [
+    {name:'김민준',cls:'해님반',phone:'010-1234-5678',mBus:1,mTime:'07:50',mStop:'행복아파트 정문',aBus:1,aTime:'16:05',aStop:'행복아파트 정문'},
+    {name:'이서연',cls:'달님반',phone:'010-2345-6789',mBus:1,mTime:'07:54',mStop:'미래빌 앞',aBus:1,aTime:'16:09',aStop:'미래빌 앞'},
+    {name:'박지호',cls:'별님반',phone:'010-3456-7890',mBus:1,mTime:'07:57',mStop:'중앙공원 입구',aBus:1,aTime:'16:13',aStop:'중앙공원 입구'},
+    {name:'최수아',cls:'해님반',phone:'010-4567-8901',mBus:2,mTime:'08:00',mStop:'빛나아파트 후문',aBus:2,aTime:'16:10',aStop:'빛나아파트 후문'},
+    {name:'정하윤',cls:'달님반',phone:'010-5678-9012',mBus:2,mTime:'08:04',mStop:'하늘초 앞',aBus:2,aTime:'16:15',aStop:'하늘초 앞'},
+    {name:'강도현',cls:'별님반',phone:'010-6789-0123',mBus:2,mTime:'08:08',mStop:'신도시 광장',aBus:2,aTime:'16:20',aStop:'신도시 광장'},
+    {name:'한예진',cls:'별님반',phone:'010-9012-3456',mBus:0,mTime:'',mStop:'직접 등원',aBus:3,aTime:'16:05',aStop:'솔빛마을 1단지'},
+    {name:'오민재',cls:'해님반',phone:'010-0123-4567',mBus:0,mTime:'',mStop:'직접 등원',aBus:3,aTime:'16:10',aStop:'무지개아파트'},
+    {name:'신유나',cls:'달님반',phone:'010-1122-3344',mBus:4,mTime:'08:00',mStop:'동산아파트 정문',aBus:4,aTime:'16:05',aStop:'동산아파트 정문'},
+    {name:'배준서',cls:'별님반',phone:'010-2233-4455',mBus:4,mTime:'08:05',mStop:'명품빌 앞',aBus:4,aTime:'16:11',aStop:'명품빌 앞'},
+    {name:'권나영',cls:'해님반',phone:'010-3344-5566',mBus:4,mTime:'08:09',mStop:'늘봄공원 앞',aBus:4,aTime:'16:17',aStop:'늘봄공원 앞'},
+    {name:'류지성',cls:'달님반',phone:'010-4455-6677',mBus:5,mTime:'08:05',mStop:'은하수 아파트',aBus:5,aTime:'16:08',aStop:'은하수 아파트'},
+    {name:'황소현',cls:'별님반',phone:'010-5566-7788',mBus:5,mTime:'08:09',mStop:'행운빌라 앞',aBus:5,aTime:'16:13',aStop:'행운빌라 앞'},
+    {name:'안지훈',cls:'해님반',phone:'010-6677-8899',mBus:5,mTime:'08:13',mStop:'성북초 건너편',aBus:5,aTime:'16:18',aStop:'성북초 건너편'},
+    {name:'서다은',cls:'달님반',phone:'010-7788-9900',mBus:5,mTime:'08:17',mStop:'파란하늘 3단지',aBus:5,aTime:'16:23',aStop:'파란하늘 3단지'},
+    {name:'조현우',cls:'별님반',phone:'010-8899-0011',mBus:6,mTime:'08:02',mStop:'초록마을 정문',aBus:6,aTime:'16:10',aStop:'초록마을 정문'},
+    {name:'고민서',cls:'해님반',phone:'010-9900-1122',mBus:6,mTime:'08:06',mStop:'달빛아파트 후문',aBus:6,aTime:'16:15',aStop:'달빛아파트 후문'},
+    {name:'문지아',cls:'달님반',phone:'010-0011-2233',mBus:6,mTime:'08:10',mStop:'별이네마을',aBus:6,aTime:'16:20',aStop:'별이네마을'},
+  ];
+  for (const s of samples) await push(R.children, s);
+}
+
+// ── 탭 ──
+window.showTab = (tab, btn) => {
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('view-'+tab).classList.add('active');
+  btn.classList.add('active');
+};
+
+// ── 모달 ──
+window.openModal = id => document.getElementById(id).classList.add('open');
+window.closeModal = id => document.getElementById(id).classList.remove('open');
+document.querySelectorAll('.modal-overlay').forEach(m =>
+  m.addEventListener('click', e => { if(e.target===m) m.classList.remove('open'); })
+);
+
+// ── 헬퍼 ──
+function arr() {
+  return Object.entries(S.children).map(([id,c])=>({...c,id}));
+}
+function busList(busId, type) {
+  const field = type==='m' ? 'mBus' : 'aBus';
+  const timeField = type==='m' ? 'mTime' : 'aTime';
+  return arr().filter(c=>c[field]===busId).sort((a,b)=>(a[timeField]||'').localeCompare(b[timeField]||''));
+}
+function nowHM() {
+  return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+}
+function log(text) { push(R.logs, {time: nowHM(), text}); }
+
+// ── 전체 렌더 ──
+function render() {
+  renderStats();
+  renderDashboard();
+  renderMorning();
+  renderAfternoon();
+  renderVehicles();
+  renderSchedule();
+}
+
+// ── 통계 ──
+function renderStats() {
+  const all = arr();
+  const present = all.filter(c=>S.mStatus[c.id]==='present').length;
+  const absent  = all.filter(c=>['absent','pickup'].includes(S.mStatus[c.id])).length;
+  const donePM  = all.filter(c=>S.aStatus[c.id]==='done').length;
+  const changed = new Set([...Object.keys(S.tChanges),...Object.keys(S.absNotes)]).size;
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-num">${all.length}</div><div class="stat-label">전체 원아</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--green)">${present}</div><div class="stat-label">등원 확인</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--red)">${absent}</div><div class="stat-label">결석/미이용</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--blue)">${donePM}</div><div class="stat-label">하원 완료</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--changed)">${changed}</div><div class="stat-label">오늘 변경</div></div>`;
+}
+
+// ── 대시보드 ──
+function renderDashboard() {
+  const el = document.getElementById('dashboardCards'); el.innerHTML='';
+  BUSES.forEach(bus => {
+    const am = busList(bus.id,'m'), pm = busList(bus.id,'a');
+    const all = [...new Map([...am,...pm].map(c=>[c.id,c])).values()];
+    if(!all.length) return;
+    const rows = all.map(c => {
+      const ms=S.mStatus[c.id], as=S.aStatus[c.id], tc=S.tChanges[c.id], ab=S.absNotes[c.id];
+      const changed=tc||ab;
+      const mBadge = ms==='present'?'<span class="badge badge-green">등원✓</span>'
+                   : ms==='absent' ?'<span class="badge badge-red">결석</span>'
+                   : ms==='pickup' ?'<span class="badge badge-amber">직접</span>'
+                   : '<span class="badge badge-gray">대기</span>';
+      const aBadge = as==='done'?'<span class="badge badge-blue">하원✓</span>'
+                   : as==='skip'?'<span class="badge badge-red">제외</span>'
+                   : '<span class="badge badge-gray">대기</span>';
+      const pmTime = tc
+        ? `<span style="color:var(--changed);font-weight:600">${tc.newTime}</span>&nbsp;<span style="text-decoration:line-through;color:var(--muted);font-size:11px">${c.aTime}</span>`
+        : `<span>${c.aTime}</span>`;
+      return `<div class="child-row">
+        <div style="flex:1;font-weight:500;font-size:13px${changed?';color:var(--changed)':''}">${changed?'★ ':''}${c.name}</div>
+        <span style="font-size:11px;color:var(--muted)">${c.cls}</span>
+        ${mBadge}${aBadge}
+        <div style="font-size:12px">${pmTime}</div>
+      </div>`;
+    }).join('');
+    const d=document.createElement('div'); d.className='card'; d.style.borderLeft=`4px solid ${bus.color}`;
+    d.innerHTML=`<div class="card-header">
+      <div class="card-title"><span style="color:${bus.color}">●</span> ${bus.name}
+        ${bus.morning?'<span class="badge badge-blue" style="font-size:10px">등</span>':''}
+        <span class="badge badge-amber" style="font-size:10px">하</span>
+      </div>
+      <span class="badge badge-gray">${all.length}명</span>
+    </div>${rows}`;
+    el.appendChild(d);
+  });
+}
+
+// ── 등원 ──
+function renderMorning() {
+  const el=document.getElementById('morningCards'); el.innerHTML='';
+  BUSES.filter(b=>b.morning).forEach(bus=>{
+    const kids=busList(bus.id,'m'); if(!kids.length) return;
+    const pCnt=kids.filter(c=>S.mStatus[c.id]==='present').length;
+    const rows=kids.map(c=>{
+      const s=S.mStatus[c.id], note=S.absNotes[c.id]||'';
+      const isAbsent=['absent','pickup'].includes(s);
+      return `<div class="child-row" style="${isAbsent?'opacity:0.55':''}">
+        <button class="check-btn ${s==='present'?'on':s?'off':''}" onclick="toggleMorning('${c.id}')">
+          ${s==='present'?'✓':s?'✗':''}
+        </button>
+        <div style="flex:1">
+          <div style="font-weight:500;font-size:13px${note?';color:var(--changed)':''}">${c.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${c.cls}</span></div>
+          <div style="font-size:11px;color:var(--muted)">${c.mTime?c.mTime+' · ':''}${c.mStop}</div>
+          ${note?`<div style="font-size:11px;color:var(--changed)">📝 ${note}</div>`:''}
+        </div>
+        <div>${s==='present'?'<span class="badge badge-green">등원</span>'
+              :s==='absent'?'<span class="badge badge-red">결석</span>'
+              :s==='pickup'?'<span class="badge badge-amber">직접</span>'
+              :'<span class="badge badge-gray">미확인</span>'}</div>
+      </div>`;
+    }).join('');
+    const d=document.createElement('div'); d.className='card'; d.style.borderLeft=`4px solid ${bus.color}`;
+    d.innerHTML=`<div class="card-header"><div class="card-title"><span style="color:${bus.color}">●</span> ${bus.name}</div><span class="badge badge-green">${pCnt}/${kids.length}명 등원</span></div>${rows}`;
+    el.appendChild(d);
+  });
+}
+
+// ── 하원 ──
+function renderAfternoon() {
+  const el=document.getElementById('afternoonCards'); el.innerHTML='';
+  BUSES.filter(b=>b.afternoon).forEach(bus=>{
+    const kids=busList(bus.id,'a').filter(c=>!['absent','pickup'].includes(S.mStatus[c.id]));
+    const doneCnt=kids.filter(c=>S.aStatus[c.id]==='done').length;
+    const rows=kids.map(c=>{
+      const s=S.aStatus[c.id], tc=S.tChanges[c.id];
+      const dispTime=tc?tc.newTime:c.aTime;
+      return `<div class="child-row">
+        <button class="check-btn ${s==='done'?'on':''}" onclick="toggleAfternoon('${c.id}')">
+          ${s==='done'?'✓':''}
+        </button>
+        <div style="flex:1">
+          <div style="font-weight:500;font-size:13px${tc?';color:var(--changed)':''}">${tc?'★ ':''}${c.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${c.cls}</span></div>
+          <div style="font-size:11px;color:var(--muted)">${c.aStop}</div>
+          ${tc?`<div style="font-size:11px;color:var(--changed)">시간변경: ${tc.newTime} (원래 ${c.aTime})${tc.memo?' · '+tc.memo:''}</div>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+          <div style="font-size:13px;font-weight:700;color:${tc?'var(--changed)':'var(--text)'}">${dispTime}</div>
+          <button class="btn btn-sm" onclick="openTimeModal('${c.id}')">시간변경</button>
+        </div>
+      </div>`;
+    }).join('');
+    const d=document.createElement('div'); d.className='card'; d.style.borderLeft=`4px solid ${bus.color}`;
+    d.innerHTML=`<div class="card-header"><div class="card-title"><span style="color:${bus.color}">●</span> ${bus.name}</div><span class="badge badge-blue">${doneCnt}/${kids.length}명 완료</span></div>${rows||'<div style="color:var(--muted);font-size:13px;padding:8px 0">오늘 하원 인원 없음</div>'}`;
+    el.appendChild(d);
+  });
+}
+
+// ── 차량 편성 ──
+function renderVehicles() {
+  const el=document.getElementById('vehiclesCards'); el.innerHTML='';
+  BUSES.forEach(bus=>{
+    const am=busList(bus.id,'m'), pm=busList(bus.id,'a');
+    if(!am.length&&!pm.length) return;
+    const mkRow=kids=>kids.map(c=>`
+      <div class="child-row" style="cursor:pointer" onclick="openChildModal('${c.id}')">
+        <div style="flex:1">
+          <div style="font-weight:500;font-size:13px">${c.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${c.cls}</span></div>
+          <div style="font-size:11px;color:var(--muted)">${c.mTime?c.mTime+' · ':''}${c.mStop}</div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${c.phone}</div>
+        <span style="color:var(--muted);font-size:16px">›</span>
+      </div>`).join('');
+    const pkRow=kids=>kids.map(c=>`
+      <div class="child-row" style="cursor:pointer" onclick="openChildModal('${c.id}')">
+        <div style="flex:1">
+          <div style="font-weight:500;font-size:13px">${c.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${c.cls}</span></div>
+          <div style="font-size:11px;color:var(--muted)">${c.aTime} · ${c.aStop}</div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${c.phone}</div>
+        <span style="color:var(--muted);font-size:16px">›</span>
+      </div>`).join('');
+    const d=document.createElement('div'); d.className='card'; d.style.borderLeft=`4px solid ${bus.color}`;
+    d.innerHTML=`<div class="card-header">
+      <div class="card-title"><span style="color:${bus.color}">●</span> ${bus.name}</div>
+      <div style="display:flex;gap:6px">
+        ${bus.morning&&am.length?`<span class="badge badge-blue">등원 ${am.length}명</span>`:''}
+        ${pm.length?`<span class="badge badge-amber">하원 ${pm.length}명</span>`:''}
+      </div>
+    </div>
+    ${bus.morning&&am.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin:4px 0 2px">🌅 등원</div>${mkRow(am)}`:''}
+    ${pm.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin:8px 0 2px">🌇 하원</div>${pkRow(pm)}`:''}`;
+    el.appendChild(d);
+  });
+}
+
+// ── 일정 ──
+function renderSchedule() {
+  const wdays=['월','화','수','목','금'];
+  let html='<tr><th>차량</th>'+wdays.map(d=>`<th>${d}</th>`).join('')+'</tr>';
+  BUSES.forEach(bus=>{
+    const am=busList(bus.id,'m'), pm=busList(bus.id,'a');
+    html+=`<tr><td style="font-weight:600;color:${bus.color};white-space:nowrap">${bus.name}</td>`;
+    wdays.forEach(()=>{
+      html+=`<td>${bus.morning&&am.length?`<div style="font-size:10px;color:var(--blue)">등 ${am.length}명</div>`:''}${pm.length?`<div style="font-size:10px;color:var(--amber)">하 ${pm.length}명</div>`:''}</td>`;
+    });
+    html+='</tr>';
+  });
+  document.getElementById('schTable').innerHTML=html;
+
+  const notes=Object.entries(S.schNotes);
+  document.getElementById('notesList').innerHTML=notes.length===0
+    ?'<div style="color:var(--muted);font-size:13px">등록된 특이사항 없음</div>'
+    :notes.map(([k,n])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div><span class="badge badge-amber" style="margin-right:8px">${n.day}</span><span style="font-size:13px">${n.content}</span></div>
+        <button class="btn btn-sm" onclick="deleteNote('${k}')">삭제</button>
+      </div>`).join('');
+}
+
+// ── 로그 ──
+function renderLog() {
+  const entries=Object.values(S.logs).reverse();
+  document.getElementById('logList').innerHTML=entries.length===0
+    ?'<div style="color:var(--muted);font-size:13px;padding:8px 0">오늘 변경 기록 없음</div>'
+    :entries.map(l=>`<div class="log-item"><div class="log-time">${l.time}</div><div class="log-text">${l.text}</div></div>`).join('');
+}
+
+// ── 액션: 등원 토글 ──
+window.toggleMorning = cid => {
+  const s=S.mStatus[cid], c=S.children[cid];
+  pending();
+  if(!s) {
+    update(ref(db,`daily/${dateKey}/morningStatus`),{[cid]:'present'});
+    log(`✅ ${c.name} 등원 확인`);
+  } else if(s==='present') {
+    update(ref(db,`daily/${dateKey}/morningStatus`),{[cid]:'absent'});
+    update(ref(db,`daily/${dateKey}/afternoonStatus`),{[cid]:'skip'});
+    log(`❌ ${c.name} 결석 처리 → 하원 자동 제외`);
+  } else {
+    remove(ref(db,`daily/${dateKey}/morningStatus/${cid}`));
+    remove(ref(db,`daily/${dateKey}/afternoonStatus/${cid}`));
+    log(`↩️ ${c.name} 등원 체크 초기화`);
+  }
+};
+
+// ── 액션: 하원 토글 ──
+window.toggleAfternoon = cid => {
+  const s=S.aStatus[cid], c=S.children[cid];
+  pending();
+  if(!s||s==='skip') {
+    update(ref(db,`daily/${dateKey}/afternoonStatus`),{[cid]:'done'});
+    log(`🏠 ${c.name} 하원 완료`);
+  } else {
+    remove(ref(db,`daily/${dateKey}/afternoonStatus/${cid}`));
+    log(`↩️ ${c.name} 하원 체크 취소`);
+  }
+};
+
+// ── 하원 시간 변경 ──
+window.openTimeModal = cid => {
+  editTimeChildId=cid;
+  const c=S.children[cid], tc=S.tChanges[cid];
+  document.getElementById('timeModalInfo').innerHTML=
+    `<strong>${c.name}</strong> · ${c.cls}<br>원래 하원 시간: <strong>${c.aTime}</strong><br>하차 장소: ${c.aStop}`;
+  document.getElementById('tNewTime').value=tc?tc.newTime:c.aTime;
+  document.getElementById('tMemo').value=tc?tc.memo:'';
+  openModal('timeModal');
+};
+window.saveTimeChange = () => {
+  const cid=editTimeChildId, c=S.children[cid];
+  const newTime=document.getElementById('tNewTime').value;
+  const memo=document.getElementById('tMemo').value;
+  pending();
+  update(ref(db,`daily/${dateKey}/timeChanges`),{[cid]:{newTime,memo,original:c.aTime}});
+  log(`🕐 ${c.name} 하원 시간 변경: ${c.aTime} → ${newTime}${memo?' ('+memo+')':''}`);
+  closeModal('timeModal');
+};
+
+// ── 결석 처리 ──
+window.openModal = id => {
+  if(id==='absenceModal') {
+    document.getElementById('absChild').innerHTML=
+      '<option value="">선택하세요</option>'+
+      arr().sort((a,b)=>a.name.localeCompare(b.name,'ko')).map(c=>`<option value="${c.id}">${c.name} (${c.cls})</option>`).join('');
+    document.getElementById('absTimeRow').style.display='none';
+    document.getElementById('absType').value='absent';
+    document.getElementById('absMemo').value='';
+  }
+  document.getElementById(id).classList.add('open');
+};
+window.saveAbsence = () => {
+  const cid=document.getElementById('absChild').value; if(!cid) return;
+  const type=document.getElementById('absType').value;
+  const memo=document.getElementById('absMemo').value;
+  const c=S.children[cid];
+  pending();
+  update(ref(db,`daily/${dateKey}/morningStatus`),{[cid]:type==='absent'?'absent':'pickup'});
+  if(type==='absent') update(ref(db,`daily/${dateKey}/afternoonStatus`),{[cid]:'skip'});
+  if(memo) update(ref(db,`daily/${dateKey}/absenceNotes`),{[cid]:memo});
+  log(`📋 ${c.name} ${type==='absent'?'결석':'직접 데려옴'} 처리${memo?' - '+memo:''}`);
+  closeModal('absenceModal');
+};
+
+// ── 아이 추가/수정 ──
+window.openChildModal = cid => {
+  editChildId=cid;
+  const c=cid?S.children[cid]:null;
+  document.getElementById('childModalTitle').textContent=c?c.name+' 정보 수정':'아이 정보 추가';
+  document.getElementById('btnDelete').style.display=c?'block':'none';
+  document.getElementById('fName').value=c?c.name:'';
+  document.getElementById('fClass').value=c?c.cls:'';
+  document.getElementById('fPhone').value=c?c.phone:'';
+  document.getElementById('fMBus').value=c?c.mBus:0;
+  document.getElementById('fMTime').value=c?c.mTime:'08:00';
+  document.getElementById('fMStop').value=c?c.mStop:'';
+  document.getElementById('fABus').value=c?c.aBus:1;
+  document.getElementById('fATime').value=c?c.aTime:'16:10';
+  document.getElementById('fAStop').value=c?c.aStop:'';
+  openModal('childModal');
+};
+window.saveChild = () => {
+  const name=document.getElementById('fName').value.trim();
+  if(!name){alert('이름을 입력해주세요');return;}
+  const data={
+    name, cls:document.getElementById('fClass').value,
+    phone:document.getElementById('fPhone').value,
+    mBus:parseInt(document.getElementById('fMBus').value),
+    mTime:document.getElementById('fMTime').value,
+    mStop:document.getElementById('fMStop').value,
+    aBus:parseInt(document.getElementById('fABus').value),
+    aTime:document.getElementById('fATime').value,
+    aStop:document.getElementById('fAStop').value,
+  };
+  pending();
+  if(editChildId){
+    const old=S.children[editChildId];
+    set(ref(db,`children/${editChildId}`),data);
+    if(old.aBus!==data.aBus) log(`🚌 ${name} 하원 차량 변경: ${old.aBus}호차 → ${data.aBus}호차`);
+    else log(`✏️ ${name} 정보 수정`);
+  } else {
+    push(R.children,data);
+    log(`➕ ${name} 원아 추가`);
+  }
+  closeModal('childModal');
+};
+window.deleteChild = () => {
+  const c=S.children[editChildId];
+  if(!confirm(`${c.name}을(를) 삭제하시겠습니까?`)) return;
+  pending();
+  remove(ref(db,`children/${editChildId}`));
+  log(`🗑️ ${c.name} 원아 삭제`);
+  closeModal('childModal');
+};
+
+// ── 특이사항 ──
+window.saveNote = () => {
+  const content=document.getElementById('nContent').value.trim(); if(!content) return;
+  const day=document.getElementById('nDay').value;
+  pending();
+  push(R.schNotes,{day,content});
+  log(`📅 특이사항 추가: ${day} - ${content}`);
+  closeModal('noteModal');
+  document.getElementById('nContent').value='';
+};
+window.deleteNote = key => {
+  const n=S.schNotes[key];
+  pending();
+  remove(ref(db,`scheduleNotes/${key}`));
+  log(`🗑️ 특이사항 삭제: ${n.day} - ${n.content}`);
+};
+</script>
+</body>
+</html>
